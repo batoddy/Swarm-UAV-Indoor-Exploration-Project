@@ -1,0 +1,6 @@
+- [Answer questions directly](feedback-answer-questions-directly.md) — plain question → plain answer, no unrequested experiments
+- [Image-only VO](feedback-no-unrequested-data-sources.md) — don't mix Tello telemetry into VO without explicit approval
+- [Test with real drone](feedback-test-with-real-drone.md) — fake-drone tests OK but keep them short; user tests on the real Tello
+- [Tello swarm goal](project-tello-swarm.md) — 3 Tello EDU swarm, ROS 2 nodes on Ubuntu; tellolink = lowest-level driver
+- [Minimal library](feedback-minimal-library.md) — tellolink stays minimal; add only what's asked, propose then ask
+- [Subagent models](feedback-subagent-models.md) — background agents on sonnet/opus, not the priciest model

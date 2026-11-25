@@ -1,0 +1,610 @@
+TELLO VERİ TABLOSU (tellolink) VE ROS 2 KARŞILIKLARI
+====================================================
+
+Kaynak: TELLO_VERI_RAPORU.md, tellolink/protocol.py, tello_ros.py, tello_interfaces/msg
+İşaretler:  ✈ gerçek uçuşta doğrulandı   ✔ koddan / TelloPy ölçümü   ~ tahmin   ? bilinmiyor
+
+Eksenler:
+  D (dünya) : x = yaw 0° yönü, y = yaw +90° yönü (sağ), z aşağı.  Pusula yok; yaw 0'ı drone seçiyor.
+  G (gövde) : x ileri, y sağ, z aşağı (FRD).
+  Açılar    : roll sağ taraf aşağı +, pitch burun yukarı +, yaw yukarıdan bakınca saat yönü +.
+
+Her kayıtta ortak alanlar:
+  recv_time  float  s  bilgisayarın paketi aldığı an (time.monotonic). Wi-Fi yüzünden titrek.
+  tick       int    -  drone sayacı, ~2,343,850 Hz. Sadece uçuş günlüğü kayıtlarında var; status, wifi, frame: None.
+
+
+BÖLÜM 1 — DRONE'DAN GELEN VERİLER (ROS'tan bağımsız)
+====================================================
+
+1.1 Özet
+--------
+
++-----------------+--------------------------------+--------------+------+-----------------------+-----------------------------------------------+
+| tellolink adı   | Drone kaynağı                  | Sıklık       | tick | Olay                  | Not                                           |
++=================+================================+==============+======+=======================+===============================================+
+| status          | paket 0x0056 (FlightData)      | 10 Hz ✈      | yok  | EVENT_STATUS          | uçuş durumu, pil                              |
+| wifi            | paket 0x001A                   | 1 Hz ✈       | yok  | EVENT_WIFI            |                                               |
+| imu             | günlük 2048 LogImuAtti         | 10 Hz ✈      | var  | EVENT_IMU             | bağlanınca birkaç bayat kayıt (q hepsi 0)     |
+| nav             | günlük 2064 LogImuEx           | 10 Hz ✈      | var  | EVENT_NAV             | kontrolcünün konum/hızı                       |
+| mvo             | günlük 29 LogNewMvoFeedback    | 5 Hz ✈       | var  | EVENT_MVO             | optik akış; IMU'ya göre 0.2–0.9 s gecikmeli ✔ |
+| tof             | günlük 16 LogTof               | 5 Hz ✈       | var  | EVENT_TOF             | aşağı bakan mesafe sensörü                    |
+| battery         | günlük 1710 LogBattery         | 5 Hz ✈       | var  | EVENT_BATTERY         |                                               |
+| sticks          | günlük 1000 LogController      | 5 Hz ✈       | var  | EVENT_STICKS          | drone'un gördüğü çubuklar                     |
+| osd             | günlük 12 LogOsdGeneral        | ~1.7 Hz ✈    | var  | EVENT_OSD             | drone'un kendi durum özeti                    |
+| gyro            | günlük 1305 LogGyro            | 20 Hz ✈      | var  | EVENT_GYRO            | sadece motorlar çalışırken                    |
+| motors          | günlük 1307 LogMotorCtrl       | 10 Hz ✈      | var  | EVENT_MOTORS          | sadece motorlar çalışırken                    |
+| attitude_target | günlük 1304 LogAttitudeControl | 2.5 Hz ✈     | var  | EVENT_ATTITUDE_TARGET | sadece motorlar çalışırken                    |
+| unsolved        | diğer günlük kayıtları         | 0.5–20 Hz    | var  | EVENT_UNSOLVED        | çözülmemiş, ham payload (bkz. 1.15)           |
+| frame           | video, UDP 6038 (H.264)        | ~29–32 fps ✈ | yok  | EVENT_FRAME           | 960×720 BGR; video thread'inde                |
++-----------------+--------------------------------+--------------+------+-----------------------+-----------------------------------------------+
+1.2 status — uçuş durumu (0x0056, 10 Hz, tick yok)
+--------------------------------------------------
+
++------------------------------------------+----------------+-------+-------------+--------------+----------------------------------------------------------------------------------------------------------------+
+| Alan                                     | tellolink tipi | Birim | Eksen       | Telde        | Not                                                                                                            |
++==========================================+================+=======+=============+==============+================================================================================================================+
+| height                                   | float          | m     | -           | int16, dm    | kalkış noktasına göre yükseklik ✈; osd.height ile aynı kaynaktan çekilmektedir                                 |
+| vel_x                                    | float          | m/s   | D           | int16, dm/s  | TelloPy adı north_speed ✈                                                                                      |
+| vel_y                                    | float          | m/s   | D           | int16, dm/s  | TelloPy adı east_speed ✈                                                                                       |
+| vel_z                                    | float          | m/s   | D (aşağı +) | int16, dm/s  | TelloPy adı ground_speed; aslında dikey hız ✈                                                                  |
+| fly_time                                 | float          | s     | -           | int16, 0.1 s | sadece havadayken artar ✈                                                                                      |
+| battery_percent                          | int            | %     | -           | uint8        |                                                                                                                |
+| battery_voltage                          | float          | V     | -           | int16, mV    | yerde ~4.2, uçuşta ~3.8 ✈ (TelloPy adı yanlış); battery.voltage ile aynı kaynaktan çekilmektedir               |
+| battery_left                             | int            | ?     | -           | int16        | hep 0 ✈                                                                                                        |
+| fly_mode                                 | int            | -     | -           | uint8        | 6 sabit (yerde/havada), 11 kalkış, 12 iniş ✈; osd.fly_mode ve sticks.fly_mode ile aynı kaynaktan çekilmektedir |
+| em_sky                                   | bool           | -     | -           | bit          | 1 = havada ✈                                                                                                   |
+| em_open                                  | bool           | -     | -           | bit          | 1 = motorlar dönüyor ✈                                                                                         |
+| em_ground                                | bool           | -     | -           | bit          | "yerde" DEĞİL: sadece motor kalkışında ~0.5 s 1 ✈                                                              |
+| battery_low, battery_lower               | bool           | -     | -           | bit          | düşük / kritik pil ~                                                                                           |
+| diğer bitler (*)                         | bool           | -     | -           | bit          | uçuşta hep 0 kaldı ✈; güvenmeyin                                                                               |
+| imu_calibration_state, throw_fly_timer,  | int            | -     | -           | uint8        | uçuşta hep 0 kaldı ✈                                                                                           |
+| camera_state, electrical_machinery_state |                |       |             |              |                                                                                                                |
++------------------------------------------+----------------+-------+-------------+--------------+----------------------------------------------------------------------------------------------------------------+
+(*) drone_hover, outage_recording, factory_mode, imu_state, pressure_state, down_visual_state,
+    power_state, battery_state, gravity_state, wind_state, front_in, front_out, front_lsc, temperature_height
+
+1.3 wifi (0x001A, 1 Hz, tick yok)
+---------------------------------
+
++----------+----------------+-------+-------+-------+--------------------------+
+| Alan     | tellolink tipi | Birim | Eksen | Telde | Not                      |
++==========+================+=======+=======+=======+==========================+
+| strength | int            | ?     | -     | uint8 | sinyal gücü; uçuşta 90 ✈ |
+| disturb  | int veya None  | ?     | -     | uint8 | parazit ~; hep 0 ✈       |
++----------+----------------+-------+-------+-------+--------------------------+
+1.4 imu — LogImuAtti (2048, 10 Hz)
+----------------------------------
+
++------------------------+-----------------+-------+-------+-------------+---------------------------------------------------------------------------------------------+
+| Alan                   | tellolink tipi  | Birim | Eksen | Telde       | Not                                                                                         |
++========================+=================+=======+=======+=============+=============================================================================================+
+| acc_x, acc_y, acc_z    | float           | g     | G     | float32     | ham ivme (özgül kuvvet); dururken z ≈ −1 ✈                                                  |
+| gyro_x, gyro_y, gyro_z | float           | rad/s | G     | float32     | açısal hız; quaternion türeviyle doğrulandı                                                 |
+| q0, q1, q2, q3         | float           | -     | G → D | float32     | yönelim, q0 = w (ZYX)                                                                       |
+| lin_acc_x/y/z          | float           | m/s²  | D     | float32     | yerçekimi çıkarılmış ivme                                                                   |
+| vel_x/y/z              | float           | m/s   | D     | float32     | hız ✈ (TelloPy adı vg_*); nav.vel_* ile aynı kaynaktan çekilmektedir (sayılar birebir aynı) |
+| baro_raw               | float           | m     | -     | float32     | ham barometre irtifası; sadece farkı anlamlı ✈                                              |
+| baro                   | float           | m     | -     | float32     | yumuşatılmış barometre irtifası ✈; nav.pos_z buradan çekilmektedir (nav.pos_z = −baro)      |
+| gyro_bias_x/y/z        | float veya None | ?     | G     | float32     | jiroskop sapma tahmini; ±0.003                                                              |
+| temperature            | float veya None | °C    | -     | int16 ÷ 100 | IMU sıcaklığı; açılışta 55, uçuşta 65 ✈                                                     |
++------------------------+-----------------+-------+-------+-------------+---------------------------------------------------------------------------------------------+
+1.5 nav — LogImuEx (2064, 10 Hz)
+--------------------------------
+
++--------------+----------------+-------+-------------+---------+---------------------------------------------------------------------------------------------+
+| Alan         | tellolink tipi | Birim | Eksen       | Telde   | Not                                                                                         |
++==============+================+=======+=============+=========+=============================================================================================+
+| vel_x/y/z    | float          | m/s   | D           | float32 | hız; imu.vel_* ile aynı kaynaktan çekilmektedir (sayılar birebir aynı)                      |
+| pos_x, pos_y | float          | m     | D           | float32 | kalkışta/inişte SIÇRAMAZ ✈; açılışta 0 olmayabilir;                                         |
+|              |                |       |             |         | drone elle kaldırılınca (0, 0)'a sıfırlandı ✈                                               |
+| pos_z        | float          | m     | D (aşağı +) | float32 | barometre irtifası, aşağı +; sadece farkı anlamlı; imu.baro'dan çekilmektedir (= −imu.baro) |
+| tof_vel      | float          | m/s   | -           | float32 | yükseklik değişim hızı; yükselirken −                                                       |
+| height       | float          | m     | -           | float32 | yerden yükseklik; ToF'tan çekiliyor olmalı ~ (tof.distance ile r = 1.00)                    |
+| flags        | int            | -     | -           | uint16  | 1 yerde, 84 havada, 68 yatay hareket ✈; anlamı ?                                            |
+| counter      | int            | -     | -           | uint16  |                                                                                             |
++--------------+----------------+-------+-------------+---------+---------------------------------------------------------------------------------------------+
+1.6 mvo — LogNewMvoFeedback (29, 5 Hz). Drone'un alt kamera + ToF ile kendi tahmini
+-----------------------------------------------------------------------------------
+
++-----------+-----------------+-------+-------------+--------------------------+-------------------------------------------------------------------------------------+
+| Alan      | tellolink tipi  | Birim | Eksen       | Telde                    | Not                                                                                 |
++===========+=================+=======+=============+==========================+=====================================================================================+
+| vel_x/y/z | float           | m/s   | D           | int16, mm/s              | TelloPy 10 kat büyük veriyordu, düzeltildi ✈                                        |
+| pos_x/y/z | float           | m     | D (z aşağı) | float32                  | yerde ~(0.02, 0.01, 0) ✈                                                            |
+|           |                 |       |             |                          | KALKIŞTA SIÇRIYOR, her seferinde farklı ✈                                           |
+|           |                 |       |             |                          | örn. (32.99, 54.84, 2.11), (−13.0, 16.6, 8.9)                                       |
+|           |                 |       |             |                          | havada beklerken 15 s'de ±0.1 m ✈; inince yer değerine döner ✈                      |
+| height    | float veya None | m     | -           | float32, işaret çevrilir | yerden yükseklik; yerde 0.1; ToF'tan çekiliyor olmalı ~ (tof.distance ile r = 1.00) |
+| flags     | int veya None   | -     | -           | uint8                    | geçerlilik bitleri ~: 0x01/02/04 hız x/y/z,                                         |
+|           |                 |       |             |                          | 0x10/20/40 konum y/x/z; yerde 8, havada 127 ✈                                       |
++-----------+-----------------+-------+-------------+--------------------------+-------------------------------------------------------------------------------------+
+Zemin görünmezse (karanlık, desensiz) bozulması beklenir ~.
+
+1.7 tof — LogTof (16, 5 Hz)
+---------------------------
+
++----------+----------------+-------+-------+-----------+----------------------------------------------+
+| Alan     | tellolink tipi | Birim | Eksen | Telde     | Not                                          |
++==========+================+=======+=======+===========+==============================================+
+| distance | float          | m     | aşağı | int16, mm | yerde 0.1 (en küçük değer); 1.3 m'de ~1.25 ✈ |
+| flag     | int            | -     | -     | uint8     | hep 1                                        |
+| counter  | int            | -     | -     | uint8     | her kayıtta +4; kayıp saymak için            |
++----------+----------------+-------+-------+-----------+----------------------------------------------+
+1.8 battery — LogBattery (1710, 5 Hz)
+-------------------------------------
+
++---------+----------------+-------+-------+-------------+------------------------------------------------------------------------------------+
+| Alan    | tellolink tipi | Birim | Eksen | Telde       | Not                                                                                |
++=========+================+=======+=======+=============+====================================================================================+
+| voltage | float          | V     | -     | float32, mV | yerde 4.09, havada 3.54 ✈; status.battery_voltage ile aynı kaynaktan çekilmektedir |
++---------+----------------+-------+-------+-------------+------------------------------------------------------------------------------------+
+1.9 sticks — LogController (1000, 5 Hz)
+---------------------------------------
+
++----------------------------+----------------+-------+-------+---------+-------------------------------------------------------------------------------+
+| Alan                       | tellolink tipi | Birim | Eksen | Telde   | Not                                                                           |
++============================+================+=======+=======+=========+===============================================================================+
+| pitch, roll, yaw, throttle | float          | −1..1 | -     | float32 | gönderilenin 0.90–0.97 katı okunuyor ✈                                        |
+| fly_mode                   | int            | -     | -     | uint8   | 6 sabit, 11 kalkış, 12 iniş; status.fly_mode ile aynı kaynaktan çekilmektedir |
+| motors_on                  | int            | -     | -     | uint8   | 1 = kalkıştan motorlar durana kadar                                           |
++----------------------------+----------------+-------+-------+---------+-------------------------------------------------------------------------------+
+1.10 osd — LogOsdGeneral (12, ~1.7 Hz)
+--------------------------------------
+
++------------------+----------------+----------+-------+-------------+---------------------------------------------------------------------------------+
+| Alan             | tellolink tipi | Birim    | Eksen | Telde       | Not                                                                             |
++==================+================+==========+=======+=============+=================================================================================+
+| height           | float          | m        | -     | int16 ÷ 10  | kalkış noktasına göre yükseklik; status.height ile aynı kaynaktan çekilmektedir |
+| vel_x/y/z        | float          | m/s      | D     | int16 ÷ 10  | 0.1 m/s adımlı, kaba                                                            |
+| pitch, roll, yaw | float          | derece   | -     | int16 ÷ 10  | yönelim açıları ✈                                                               |
+| fly_mode         | int            | -        | -     | uint8       | status.fly_mode ile aynı kaynaktan çekilmektedir                                |
+| tof_height       | float          | m        | -     | uint8 ÷ 10  | ToF'tan çekilmektedir (mesafe sensörü yüksekliği)                               |
+| fly_time         | float          | s        | -     | uint16 ÷ 10 | motorların çalıştığı süre                                                       |
+| yaw_rate         | float          | derece/s | -     | int16 ÷ 10  |                                                                                 |
++------------------+----------------+----------+-------+-------------+---------------------------------------------------------------------------------+
+1.11 gyro — LogGyro (1305, 20 Hz, sadece motorlar çalışırken)
+-------------------------------------------------------------
+
++--------+---------------------+-------+-------+-------------+-------------------------------------------------+
+| Alan   | tellolink tipi      | Birim | Eksen | Telde       | Not                                             |
++========+=====================+=======+=======+=============+=================================================+
+| stages | 3 × (x, y, z) float | ?     | G ~   | 9 × float32 | aynı gyronun 3 işlem aşaması, ~10–20 ms arayla; |
+|        |                     |       |       |             | x/y eksen sırası tahmin                         |
++--------+---------------------+-------+-------+-------------+-------------------------------------------------+
+1.12 motors — LogMotorCtrl (1307, 10 Hz, sadece motorlar çalışırken)
+--------------------------------------------------------------------
+
++------+----------------+-------+-------+--------------+---------------------------------------------+
+| Alan | tellolink tipi | Birim | Eksen | Telde        | Not                                         |
++======+================+=======+=======+==============+=============================================+
+| pwm  | 4 × float      | %     | -     | uint16 ÷ 100 | sıra: ön sağ, ön sol, arka sol, arka sağ ~; |
+|      |                |       |       |              | rölantide ~24, havada 55–65 ✈               |
++------+----------------+-------+-------+--------------+---------------------------------------------+
+1.13 attitude_target — LogAttitudeControl (1304, 2.5 Hz, sadece motorlar çalışırken)
+------------------------------------------------------------------------------------
+
++---------------------------------------+----------------+-------+-------+---------+---------------------+
+| Alan                                  | tellolink tipi | Birim | Eksen | Telde   | Not                 |
++=======================================+================+=======+=======+=========+=====================+
+| target_yaw, target_roll, target_pitch | float          | rad   | -     | float32 | kontrolcünün hedefi |
+| yaw, roll, pitch                      | float          | rad   | -     | float32 | gerçek yönelim      |
++---------------------------------------+----------------+-------+-------+---------+---------------------+
+1.14 frame — video (UDP 6038, ~29–32 fps, tick yok)
+---------------------------------------------------
+
++-----------+-------------------+--------+-------+---------------+------------------------------------------------+
+| Alan      | tellolink tipi    | Birim  | Eksen | Telde         | Not                                            |
++===========+===================+========+=======+===============+================================================+
+| image     | numpy uint8 H×W×3 | piksel | -     | H.264 → PyAV  | BGR, 960×720; ilk kare bağlandıktan ~2 s sonra |
+| data      | bytes             | -      | -     | H.264 Annex-B | karenin ham byte'ları                          |
+| keyframe  | bool              | -      | -     | -             | I-kare mi                                      |
+| recv_time | float             | s      | -     | -             | karenin SON UDP paketinin geliş anı            |
++-----------+-------------------+--------+-------+---------------+------------------------------------------------+
+1.15 unsolved — çözülmemiş günlük kayıtları
+-------------------------------------------
+
++-----------+----------------+----------------------------------------------------------------------------------------------------+
+| Alan      | tellolink tipi | Not                                                                                                |
++===========+================+====================================================================================================+
+| record_id | int            | anlamı bilinen ama çözülmeyen: 1001 (uçuş durumu), 1306 (kontrol çıkışları), 2208 (ikinci yönelim) |
+|           |                | anlamı kısmen / hiç bilinmeyen: 1002, 1200, 1202, 1203, 1300, 1303, 10085, 10086, 10100            |
+| payload   | bytes          | ham byte'lar (XOR çözülmüş)                                                                        |
++-----------+----------------+----------------------------------------------------------------------------------------------------+
+BÖLÜM 2 — ROS 2 TOPIC'LERİ VE TELLO VERİSİYLE EŞLEŞMESİ (tello_ros.py: sadece köprü)
+====================================================================================
+
+Paket sadece köprü: drone verisini yayınlar, komutları iletir. Odom, füzyon, offset, kalibrasyon yok.
+Topic ve servis adları göreli; drone adı namespace olarak verilir (örn. /tello1/raw/nav).
+Bütün topic'ler raw/ altında. Değerler ROS kurallarına çevrilir (REP-103, SI):
+  - Gövde ekseni: FRD → FLU (base_link). Dünya ekseni: x = yaw 0 yönü, y sol, z yukarı (pusula yok: gerçek ENU değil).
+  - Açılar radyan; roll sağ taraf aşağı +, pitch burun aşağı +, yaw saat yönü tersi +.
+  - Stickler (raw/sticks, cmd_sticks) Tello işaretlerinde: roll sağ +, pitch ileri +, yaw saat yönü +, throttle yukarı +.
+Her mesajda: header.stamp ← recv_time (bilgisayarın paketi aldığı an, ROS zamanına çevrilmiş); header.frame_id boş.
+  Günlük kayıtlarından gelenlerde tick ← tick (drone sayacı, uint32). status, wifi, frame ve görüntüde tick yok.
+Kayıtta olmayan isteğe bağlı alan: float → NaN, tamsayı → −1 (gyro_bias, imu.temperature, mvo.height, mvo.flags, wifi.disturb).
+Bayat IMU kayıtları (bağlanınca gelen, quaternion'ı hepsi 0 olanlar) raw/imu, raw/baro ve raw/std/imu'da atılır.
+TF: tello_description paketi (URDF + robot_state_publisher) basar; tello_ros TF basmaz.
+
+2.1 Topic listesi
+-----------------
+
++-------------------------+---------------------------------+------------------------------------+--------------------------+------------------------------------------+
+| Topic                   | Mesaj tipi                      | Sıklık                             | Tello verisi (tellolink) | Drone kaynağı                            |
++=========================+=================================+====================================+==========================+==========================================+
+| raw/status              | tello_interfaces/Status         | 10 Hz                              | status                   | paket 0x0056 (FlightData)                |
+| raw/wifi                | tello_interfaces/Wifi           | 1 Hz                               | wifi                     | paket 0x001A                             |
+| raw/imu                 | tello_interfaces/Imu            | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
+| raw/baro                | tello_interfaces/Baro           | 10 Hz                              | imu                      | günlük 2048 LogImuAtti (barometre kısmı) |
+| raw/gyro                | tello_interfaces/Gyro           | 20 Hz, sadece motorlar çalışırken  | gyro                     | günlük 1305 LogGyro                      |
+| raw/mvo                 | tello_interfaces/Mvo            | 5 Hz                               | mvo                      | günlük 29 LogNewMvoFeedback              |
+| raw/tof                 | tello_interfaces/Tof            | 5 Hz                               | tof                      | günlük 16 LogTof                         |
+| raw/nav                 | tello_interfaces/Nav            | 10 Hz                              | nav                      | günlük 2064 LogImuEx                     |
+| raw/osd                 | tello_interfaces/Osd            | ~1.7 Hz                            | osd                      | günlük 12 LogOsdGeneral                  |
+| raw/sticks              | tello_interfaces/Sticks         | 5 Hz                               | sticks                   | günlük 1000 LogController                |
+| raw/attitude_target     | tello_interfaces/AttitudeTarget | 2.5 Hz, sadece motorlar çalışırken | attitude_target          | günlük 1304 LogAttitudeControl           |
+| raw/motors              | tello_interfaces/Motors         | 10 Hz, sadece motorlar çalışırken  | motors                   | günlük 1307 LogMotorCtrl                 |
+| raw/battery             | tello_interfaces/Battery        | 5 Hz                               | battery                  | günlük 1710 LogBattery                   |
+| raw/unsolved            | tello_interfaces/Unsolved       | kayda göre 0.5–20 Hz               | unsolved                 | çözülmemiş günlük kayıtları              |
+| raw/frame               | tello_interfaces/Frame          | ~30 fps                            | frame                    | video, UDP 6038                          |
+| raw/std/imu             | sensor_msgs/Imu                 | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
+| raw/std/imu/temperature | sensor_msgs/Temperature         | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
+| raw/std/tof             | sensor_msgs/Range               | 5 Hz                               | tof                      | günlük 16 LogTof                         |
+| raw/std/battery         | sensor_msgs/BatteryState        | 10 Hz                              | status                   | paket 0x0056 (FlightData)                |
+| raw/std/image           | sensor_msgs/Image               | ~30 fps                            | frame                    | video, UDP 6038                          |
++-------------------------+---------------------------------+------------------------------------+--------------------------+------------------------------------------+
+
+2.2 Alan alan eşleşme: raw/<topic> (tello_interfaces)
+-----------------------------------------------------
+
+2.2.1 raw/status ← status (paket 0x0056 (FlightData)), tello_interfaces/Status
+··············································································
+
+Ne: Uçuş durumu: yükseklik, hız, pil, uçuş modu ve durum bitleri.
+Sıklık: 10 Hz    Tip: tello_interfaces/Status    Kaynak: paket 0x0056 (FlightData)
+
++----------------------------+-----------------------------------+-----------------------+
+| ROS alanı                  | Tello verisi                      | Dönüşüm               |
++============================+===================================+=======================+
+| height                     | status.height                     | aynen                 |
+| vel_x                      | status.vel_x                      | aynen                 |
+| vel_y                      | status.vel_y                      | × −1 (sağ → sol)      |
+| vel_z                      | status.vel_z                      | × −1 (aşağı → yukarı) |
+| fly_time                   | status.fly_time                   | aynen                 |
+| battery_percent            | status.battery_percent            | aynen                 |
+| battery_voltage            | status.battery_voltage            | aynen                 |
+| battery_left               | status.battery_left               | aynen                 |
+| fly_mode                   | status.fly_mode                   | aynen                 |
+| em_sky                     | status.em_sky                     | aynen                 |
+| em_ground                  | status.em_ground                  | aynen                 |
+| em_open                    | status.em_open                    | aynen                 |
+| drone_hover                | status.drone_hover                | aynen                 |
+| outage_recording           | status.outage_recording           | aynen                 |
+| battery_low                | status.battery_low                | aynen                 |
+| battery_lower              | status.battery_lower              | aynen                 |
+| factory_mode               | status.factory_mode               | aynen                 |
+| imu_state                  | status.imu_state                  | aynen                 |
+| pressure_state             | status.pressure_state             | aynen                 |
+| down_visual_state          | status.down_visual_state          | aynen                 |
+| power_state                | status.power_state                | aynen                 |
+| battery_state              | status.battery_state              | aynen                 |
+| gravity_state              | status.gravity_state              | aynen                 |
+| wind_state                 | status.wind_state                 | aynen                 |
+| imu_calibration_state      | status.imu_calibration_state      | aynen                 |
+| throw_fly_timer            | status.throw_fly_timer            | aynen                 |
+| camera_state               | status.camera_state               | aynen                 |
+| electrical_machinery_state | status.electrical_machinery_state | aynen                 |
+| front_in                   | status.front_in                   | aynen                 |
+| front_out                  | status.front_out                  | aynen                 |
+| front_lsc                  | status.front_lsc                  | aynen                 |
+| temperature_height         | status.temperature_height         | aynen                 |
++----------------------------+-----------------------------------+-----------------------+
+
+2.2.2 raw/wifi ← wifi (paket 0x001A), tello_interfaces/Wifi
+···························································
+
+Ne: Wi-Fi sinyal gücü ve parazit.
+Sıklık: 1 Hz    Tip: tello_interfaces/Wifi    Kaynak: paket 0x001A
+
++-----------+---------------+-------------------------+
+| ROS alanı | Tello verisi  | Dönüşüm                 |
++===========+===============+=========================+
+| strength  | wifi.strength | aynen                   |
+| disturb   | wifi.disturb  | aynen; pakette yoksa −1 |
++-----------+---------------+-------------------------+
+
+2.2.3 raw/imu ← imu (günlük 2048 LogImuAtti), tello_interfaces/Imu
+··································································
+
+Ne: IMU: ivme, açısal hız, yönelim; drone'un kestirdiği hız ve dünya eksenindeki ivme; IMU sıcaklığı.
+Sıklık: 10 Hz    Tip: tello_interfaces/Imu    Kaynak: günlük 2048 LogImuAtti
+
++-------------+-----------------+-----------------------------------------+
+| ROS alanı   | Tello verisi    | Dönüşüm                                 |
++=============+=================+=========================================+
+| tick        | imu.tick        | aynen                                   |
+| acc_x       | imu.acc_x       | g → m/s² (× 9.80665), aynen (FRD → FLU) |
+| acc_y       | imu.acc_y       | g → m/s² (× 9.80665), × −1 (FRD → FLU)  |
+| acc_z       | imu.acc_z       | g → m/s² (× 9.80665), × −1 (FRD → FLU)  |
+| gyro_x      | imu.gyro_x      | aynen (FRD → FLU)                       |
+| gyro_y      | imu.gyro_y      | × −1 (FRD → FLU)                        |
+| gyro_z      | imu.gyro_z      | × −1 (FRD → FLU)                        |
+| q0          | imu.q0          | aynen                                   |
+| q1          | imu.q1          | aynen                                   |
+| q2          | imu.q2          | × −1                                    |
+| q3          | imu.q3          | × −1                                    |
+| lin_acc_x   | imu.lin_acc_x   | aynen                                   |
+| lin_acc_y   | imu.lin_acc_y   | × −1 (sağ → sol)                        |
+| lin_acc_z   | imu.lin_acc_z   | × −1 (aşağı → yukarı)                   |
+| vel_x       | imu.vel_x       | aynen                                   |
+| vel_y       | imu.vel_y       | × −1 (sağ → sol)                        |
+| vel_z       | imu.vel_z       | × −1 (aşağı → yukarı)                   |
+| gyro_bias_x | imu.gyro_bias_x | aynen (FRD → FLU)                       |
+| gyro_bias_y | imu.gyro_bias_y | × −1 (FRD → FLU)                        |
+| gyro_bias_z | imu.gyro_bias_z | × −1 (FRD → FLU)                        |
+| temperature | imu.temperature | aynen (°C); kayıtta yoksa NaN           |
++-------------+-----------------+-----------------------------------------+
+
+2.2.4 raw/baro ← imu (günlük 2048 LogImuAtti (barometre kısmı)), tello_interfaces/Baro
+······················································································
+
+Ne: Barometre irtifası (ham ve yumuşatılmış). Drone bunu IMU kaydının içinde gönderiyor.
+Sıklık: 10 Hz    Tip: tello_interfaces/Baro    Kaynak: günlük 2048 LogImuAtti (barometre kısmı)
+
++--------------+--------------+---------+
+| ROS alanı    | Tello verisi | Dönüşüm |
++==============+==============+=========+
+| tick         | imu.tick     | aynen   |
+| altitude_raw | imu.baro_raw | aynen   |
+| altitude     | imu.baro     | aynen   |
++--------------+--------------+---------+
+
+2.2.5 raw/gyro ← gyro (günlük 1305 LogGyro), tello_interfaces/Gyro
+··································································
+
+Ne: Jiroskopun üç işlem aşaması.
+Sıklık: 20 Hz, sadece motorlar çalışırken    Tip: tello_interfaces/Gyro    Kaynak: günlük 1305 LogGyro
+
++-----------+----------------+-------------------------+
+| ROS alanı | Tello verisi   | Dönüşüm                 |
++===========+================+=========================+
+| tick      | gyro.tick      | aynen                   |
+| stage0    | gyro.stages[0] | (x, −y, −z) (FRD → FLU) |
+| stage1    | gyro.stages[1] | (x, −y, −z) (FRD → FLU) |
+| stage2    | gyro.stages[2] | (x, −y, −z) (FRD → FLU) |
++-----------+----------------+-------------------------+
+
+2.2.6 raw/mvo ← mvo (günlük 29 LogNewMvoFeedback), tello_interfaces/Mvo
+·······································································
+
+Ne: Alt kamera + ToF ile drone'un optik akış konum/hız tahmini; konum kalkışta sıçrar.
+Sıklık: 5 Hz    Tip: tello_interfaces/Mvo    Kaynak: günlük 29 LogNewMvoFeedback
+
++-----------+--------------+--------------------------+
+| ROS alanı | Tello verisi | Dönüşüm                  |
++===========+==============+==========================+
+| tick      | mvo.tick     | aynen                    |
+| vel_x     | mvo.vel_x    | aynen                    |
+| vel_y     | mvo.vel_y    | × −1 (sağ → sol)         |
+| vel_z     | mvo.vel_z    | × −1 (aşağı → yukarı)    |
+| pos_x     | mvo.pos_x    | aynen                    |
+| pos_y     | mvo.pos_y    | × −1 (sağ → sol)         |
+| pos_z     | mvo.pos_z    | × −1 (aşağı → yukarı)    |
+| height    | mvo.height   | aynen; kayıtta yoksa NaN |
+| flags     | mvo.flags    | aynen; kayıtta yoksa −1  |
++-----------+--------------+--------------------------+
+
+2.2.7 raw/tof ← tof (günlük 16 LogTof), tello_interfaces/Tof
+····························································
+
+Ne: Aşağı bakan mesafe sensörü.
+Sıklık: 5 Hz    Tip: tello_interfaces/Tof    Kaynak: günlük 16 LogTof
+
++-----------+--------------+---------+
+| ROS alanı | Tello verisi | Dönüşüm |
++===========+==============+=========+
+| tick      | tof.tick     | aynen   |
+| distance  | tof.distance | aynen   |
+| flag      | tof.flag     | aynen   |
+| counter   | tof.counter  | aynen   |
++-----------+--------------+---------+
+
+2.2.8 raw/nav ← nav (günlük 2064 LogImuEx), tello_interfaces/Nav
+································································
+
+Ne: Uçuş kontrolcüsünün kullandığı konum/hız tahmini; kalkışta ve inişte sıçramaz.
+Sıklık: 10 Hz    Tip: tello_interfaces/Nav    Kaynak: günlük 2064 LogImuEx
+
++-----------+--------------+-----------------------+
+| ROS alanı | Tello verisi | Dönüşüm               |
++===========+==============+=======================+
+| tick      | nav.tick     | aynen                 |
+| vel_x     | nav.vel_x    | aynen                 |
+| vel_y     | nav.vel_y    | × −1 (sağ → sol)      |
+| vel_z     | nav.vel_z    | × −1 (aşağı → yukarı) |
+| pos_x     | nav.pos_x    | aynen                 |
+| pos_y     | nav.pos_y    | × −1 (sağ → sol)      |
+| pos_z     | nav.pos_z    | × −1 (aşağı → yukarı) |
+| tof_vel   | nav.tof_vel  | × −1 (yukarı +)       |
+| height    | nav.height   | aynen                 |
+| flags     | nav.flags    | aynen                 |
+| counter   | nav.counter  | aynen                 |
++-----------+--------------+-----------------------+
+
+2.2.9 raw/osd ← osd (günlük 12 LogOsdGeneral), tello_interfaces/Osd
+···································································
+
+Ne: Drone'un kendi durum özeti: yükseklik, hız, açılar, uçuş süresi.
+Sıklık: ~1.7 Hz    Tip: tello_interfaces/Osd    Kaynak: günlük 12 LogOsdGeneral
+
++------------+----------------+----------------------------------------+
+| ROS alanı  | Tello verisi   | Dönüşüm                                |
++============+================+========================================+
+| tick       | osd.tick       | aynen                                  |
+| height     | osd.height     | aynen                                  |
+| vel_x      | osd.vel_x      | aynen                                  |
+| vel_y      | osd.vel_y      | × −1 (sağ → sol)                       |
+| vel_z      | osd.vel_z      | × −1 (aşağı → yukarı)                  |
+| pitch      | osd.pitch      | derece → rad, × −1 (burun aşağı +)     |
+| roll       | osd.roll       | derece → rad                           |
+| yaw        | osd.yaw        | derece → rad, × −1 (saat yönü tersi +) |
+| fly_mode   | osd.fly_mode   | aynen                                  |
+| tof_height | osd.tof_height | aynen                                  |
+| fly_time   | osd.fly_time   | aynen                                  |
+| yaw_rate   | osd.yaw_rate   | derece/s → rad/s, × −1                 |
++------------+----------------+----------------------------------------+
+
+2.2.10 raw/sticks ← sticks (günlük 1000 LogController), tello_interfaces/Sticks
+···············································································
+
+Ne: Drone'un gördüğü stick değerleri (Tello işaretleri).
+Sıklık: 5 Hz    Tip: tello_interfaces/Sticks    Kaynak: günlük 1000 LogController
+
++-----------+------------------+---------+
+| ROS alanı | Tello verisi     | Dönüşüm |
++===========+==================+=========+
+| tick      | sticks.tick      | aynen   |
+| pitch     | sticks.pitch     | aynen   |
+| roll      | sticks.roll      | aynen   |
+| yaw       | sticks.yaw       | aynen   |
+| throttle  | sticks.throttle  | aynen   |
+| fly_mode  | sticks.fly_mode  | aynen   |
+| motors_on | sticks.motors_on | aynen   |
++-----------+------------------+---------+
+
+2.2.11 raw/attitude_target ← attitude_target (günlük 1304 LogAttitudeControl), tello_interfaces/AttitudeTarget
+··············································································································
+
+Ne: Kontrolcünün hedef yönelimi ve gerçek yönelim.
+Sıklık: 2.5 Hz, sadece motorlar çalışırken    Tip: tello_interfaces/AttitudeTarget    Kaynak: günlük 1304 LogAttitudeControl
+
++--------------+------------------------------+---------+
+| ROS alanı    | Tello verisi                 | Dönüşüm |
++==============+==============================+=========+
+| tick         | attitude_target.tick         | aynen   |
+| target_yaw   | attitude_target.target_yaw   | × −1    |
+| target_roll  | attitude_target.target_roll  | aynen   |
+| target_pitch | attitude_target.target_pitch | × −1    |
+| yaw          | attitude_target.yaw          | × −1    |
+| roll         | attitude_target.roll         | aynen   |
+| pitch        | attitude_target.pitch        | × −1    |
++--------------+------------------------------+---------+
+
+2.2.12 raw/motors ← motors (günlük 1307 LogMotorCtrl), tello_interfaces/Motors
+··············································································
+
+Ne: Motor sürüş yüzdeleri (PWM).
+Sıklık: 10 Hz, sadece motorlar çalışırken    Tip: tello_interfaces/Motors    Kaynak: günlük 1307 LogMotorCtrl
+
++-----------+--------------+---------+
+| ROS alanı | Tello verisi | Dönüşüm |
++===========+==============+=========+
+| tick      | motors.tick  | aynen   |
+| pwm       | motors.pwm   | aynen   |
++-----------+--------------+---------+
+
+2.2.13 raw/battery ← battery (günlük 1710 LogBattery), tello_interfaces/Battery
+···············································································
+
+Ne: Pil gerilimi.
+Sıklık: 5 Hz    Tip: tello_interfaces/Battery    Kaynak: günlük 1710 LogBattery
+
++-----------+-----------------+---------+
+| ROS alanı | Tello verisi    | Dönüşüm |
++===========+=================+=========+
+| tick      | battery.tick    | aynen   |
+| voltage   | battery.voltage | aynen   |
++-----------+-----------------+---------+
+
+2.2.14 raw/unsolved ← unsolved (çözülmemiş günlük kayıtları), tello_interfaces/Unsolved
+·······················································································
+
+Ne: Anlamı çözülmemiş günlük kayıtları: kayıt numarası ve ham byte'lar.
+Sıklık: kayda göre 0.5–20 Hz    Tip: tello_interfaces/Unsolved    Kaynak: çözülmemiş günlük kayıtları
+
++-----------+--------------------+---------+
+| ROS alanı | Tello verisi       | Dönüşüm |
++===========+====================+=========+
+| tick      | unsolved.tick      | aynen   |
+| record_id | unsolved.record_id | aynen   |
+| payload   | unsolved.payload   | aynen   |
++-----------+--------------------+---------+
+
+2.2.15 raw/frame ← frame (video, UDP 6038), tello_interfaces/Frame
+··································································
+
+Ne: Kamera karesi, ham H.264 byte'ları (çözülmüş görüntü raw/std/image'da).
+Sıklık: ~30 fps    Tip: tello_interfaces/Frame    Kaynak: video, UDP 6038
+
++-----------+----------------+-------------------+
+| ROS alanı | Tello verisi   | Dönüşüm           |
++===========+================+===================+
+| keyframe  | frame.keyframe | aynen             |
+| data      | frame.data     | aynen (ham H.264) |
++-----------+----------------+-------------------+
+
+2.3 Alan alan eşleşme: raw/std/* (sensor_msgs)
+----------------------------------------------
+
++-------------------------+-------------------------------------------------------------+---------+--------------------------+
+| Topic                   | Ne                                                          | Sıklık  | Tip                      |
++=========================+=============================================================+=========+==========================+
+| raw/std/imu             | IMU: yönelim, açısal hız, ivme (base_link, yerçekimi dahil) | 10 Hz   | sensor_msgs/Imu          |
+| raw/std/imu/temperature | IMU sıcaklığı                                               | 10 Hz   | sensor_msgs/Temperature  |
+| raw/std/tof             | aşağı bakan mesafe sensörü                                  | 5 Hz    | sensor_msgs/Range        |
+| raw/std/battery         | pil gerilimi ve yüzdesi (uçuş durumu paketinden)            | 10 Hz   | sensor_msgs/BatteryState |
+| raw/std/image           | kamera görüntüsü, çözülmüş (bgr8)                           | ~30 fps | sensor_msgs/Image        |
++-------------------------+-------------------------------------------------------------+---------+--------------------------+
+
++-------------------------+----------------------------------------+----------------------------+---------------------------------------------------+
+| Topic                   | ROS alanı                              | Tello verisi               | Dönüşüm                                           |
++=========================+========================================+============================+===================================================+
+| raw/std/imu             | header.frame_id                        | -                          | base_link                                         |
+|                         | orientation (w, x, y, z)               | imu.q0, q1, q2, q3         | (q0, q1, −q2, −q3), normalize                     |
+|                         | angular_velocity (x, y, z)             | imu.gyro_x, gyro_y, gyro_z | (x, −y, −z), rad/s                                |
+|                         | linear_acceleration (x, y, z)          | imu.acc_x, acc_y, acc_z    | × 9.80665, (x, −y, −z); dururken z ≈ +9.81        |
+|                         | *_covariance                           | -                          | doldurulmuyor (0 = bilinmiyor)                    |
+| raw/std/imu/temperature | temperature                            | imu.temperature            | aynen (°C); kayıtta yoksa yayınlanmaz             |
+| raw/std/tof             | header.frame_id                        | -                          | tof                                               |
+|                         | range                                  | tof.distance               | aynen (m)                                         |
+|                         | min_range, max_range, field_of_view    | -                          | sabit: 0.1 m, 10.0 m, 0.44 rad (tahmin); INFRARED |
+| raw/std/battery         | header.frame_id                        | -                          | base_link                                         |
+|                         | voltage                                | status.battery_voltage     | aynen (V)                                         |
+|                         | percentage                             | status.battery_percent     | ÷ 100                                             |
+|                         | temperature, current, charge, capacity | -                          | NaN                                               |
+|                         | power_supply_status / technology       | -                          | DISCHARGING / LIPO; present = True                |
+| raw/std/image           | header.frame_id                        | -                          | camera_optical                                    |
+|                         | height, width, data                    | frame.image                | aynen; encoding bgr8, step = width × 3            |
++-------------------------+----------------------------------------+----------------------------+---------------------------------------------------+
+
+2.4 Komutlar (ROS → drone)
+--------------------------
+
++------------+--------------+-------------------------------+----------------------------------------+------------------------------------------------------------+
+| Ad         | Tür          | Tip                           | Drone komutu                           | Davranış                                                   |
++============+==============+===============================+========================================+============================================================+
+| takeoff    | service      | std_srvs/Trigger              | takeoff()                              | bir kez gönderir; bağlı değilse success=false              |
+| land       | service      | std_srvs/Trigger              | land()                                 | stickleri sıfırlar, bir kez gönderir                       |
+| emergency  | service      | std_srvs/Trigger              | emergency()                            | stickleri sıfırlar, motorlar hemen durur (havadaysa düşer) |
+| cmd_sticks | subscription | tello_interfaces/StickCommand | set_sticks(pitch, roll, yaw, throttle) | −1..1, Tello işaretleri; her zaman uygulanır;              |
+|            |              |                               |                                        | 0.5 s yeni mesaj gelmezse stickler 0                       |
+| fast_mode  | subscription | std_msgs/Bool                 | set_fast_mode(enabled)                 | true hızlı, false yavaş; açılışta yavaş                    |
++------------+--------------+-------------------------------+----------------------------------------+------------------------------------------------------------+
+
+Drone komutları onaylamaz: tutup tutmadığı raw/status'tan (em_sky, em_open, fly_mode) anlaşılır.
+Node kapanırken drone havadaysa land gönderilir.
+
+2.5 TF (tello_description)
+--------------------------
+
++-------------------------+---------------+----------------------------+
+| Ebeveyn → çocuk         | Konum (m)     | Dönüş                      |
++=========================+===============+============================+
+| base_link → camera      | (0.045, 0, 0) | yok                        |
+| camera → camera_optical | (0, 0, 0)     | x sağ, y aşağı, z ileri    |
+| base_link → tof         | (0, 0, −0.02) | x aşağı bakar (pitch +90°) |
++-------------------------+---------------+----------------------------+
+
+Konumlar ölçülmedi, kaba tahmin. Frame'ler namespace ön ekini alır (frame_prefix), örn. tello1/base_link.
+  ros2 launch tello_description description.launch.py namespace:=tello1
+odom → base_link TF'ini füzyon (EKF) tarafı basar.

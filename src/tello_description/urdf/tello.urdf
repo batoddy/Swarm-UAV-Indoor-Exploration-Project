@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!-- Tello sensor frames. base_link is FLU (REP-103). Mounting positions are rough estimates, not measured. -->
+<robot name="tello">
+  <link name="base_link"/>
+
+  <!-- front camera -->
+  <link name="camera"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera"/>
+    <origin xyz="0.045 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- optical frame (x right, y down, z forward); image_raw uses this frame -->
+  <link name="camera_optical"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera"/>
+    <child link="camera_optical"/>
+    <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
+  </joint>
+
+  <!-- downward ToF: sensor_msgs/Range measures along +x, so x points down (pitch +90 deg) -->
+  <link name="tof"/>
+  <joint name="tof_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="tof"/>
+    <origin xyz="0 0 -0.02" rpy="0 1.5707963 0"/>
+  </joint>
+</robot>

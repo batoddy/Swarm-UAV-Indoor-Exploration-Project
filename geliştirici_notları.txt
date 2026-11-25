@@ -1,0 +1,13 @@
+=> optikflow-(mvo) 30 cm - 30 mt arasında çalışabiliyor, 30cm altında füzyonda 0 ile çarpılması lazım
+en iyi ise 30cm - 6mt arasında çalışıyor. kaynak:user-manual-1.4
+
+=> dronun kendi içinde yavaş/hızlı uçma modları varmış onlara bakılabilir kaynak:user-manual
+
+=> cmd_vel yerine stick komutu gönderilebiliyor. stick oranının hıza etkisi bilinmediği için stick 0 ile 1.0 arasında veirlebiliyor sadece.
+
+=> zaman olarak recv_time kullanılıyor tick değil. problem olabilir.
+
+=> görüntü image ve frame olarak 2 farklı topicte basılıyor. frame h264 decode edilmemiş versiuon
+image decode edilmiş veriyor. fakat iamge'de 1 kare 2mb olduğu için donmalar oluyor, görüntü vslam vs algoritmalarına h264 ile gönderilecek yeirnde decoede edilecek. 
+
+=> sdk 2.0 da stick yerine hem konum hem hız emirleri veirlebildiği yazıyor

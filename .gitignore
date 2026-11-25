@@ -1,0 +1,19 @@
+# colcon / ROS 2 build çıktıları
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editör / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# İşletim sistemi
+.DS_Store

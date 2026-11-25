@@ -1,0 +1,3 @@
+[submodule "src/tello_pkg/tello_pkg/tellolink"]
+	path = src/tello_pkg/tello_pkg/tellolink
+	url = https://github.com/batoddy/tellolink.git
