@@ -221,7 +221,7 @@ Bütün topic'ler raw/ altında. Değerler ROS kurallarına çevrilir (REP-103, 
   - Açılar radyan; roll sağ taraf aşağı +, pitch burun aşağı +, yaw saat yönü tersi +.
   - Stickler (raw/sticks, cmd_sticks) Tello işaretlerinde: roll sağ +, pitch ileri +, yaw saat yönü +, throttle yukarı +.
 Her mesajda: header.stamp ← recv_time (bilgisayarın paketi aldığı an, ROS zamanına çevrilmiş); header.frame_id boş.
-  Günlük kayıtlarından gelenlerde tick ← tick (drone sayacı, uint32). status, wifi, frame ve görüntüde tick yok.
+  Günlük kayıtlarından gelenlerde tick ← tick (drone sayacı, uint32). status, wifi ve görüntüde tick yok.
 Kayıtta olmayan isteğe bağlı alan: float → NaN, tamsayı → −1 (gyro_bias, imu.temperature, mvo.height, mvo.flags, wifi.disturb).
 Bayat IMU kayıtları (bağlanınca gelen, quaternion'ı hepsi 0 olanlar) raw/imu, raw/baro ve raw/std/imu'da atılır.
 TF: tello_description paketi (URDF + robot_state_publisher) basar; tello_ros TF basmaz.
@@ -229,30 +229,30 @@ TF: tello_description paketi (URDF + robot_state_publisher) basar; tello_ros TF 
 2.1 Topic listesi
 -----------------
 
-+-------------------------+---------------------------------+------------------------------------+--------------------------+------------------------------------------+
-| Topic                   | Mesaj tipi                      | Sıklık                             | Tello verisi (tellolink) | Drone kaynağı                            |
-+=========================+=================================+====================================+==========================+==========================================+
-| raw/status              | tello_interfaces/Status         | 10 Hz                              | status                   | paket 0x0056 (FlightData)                |
-| raw/wifi                | tello_interfaces/Wifi           | 1 Hz                               | wifi                     | paket 0x001A                             |
-| raw/imu                 | tello_interfaces/Imu            | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
-| raw/baro                | tello_interfaces/Baro           | 10 Hz                              | imu                      | günlük 2048 LogImuAtti (barometre kısmı) |
-| raw/gyro                | tello_interfaces/Gyro           | 20 Hz, sadece motorlar çalışırken  | gyro                     | günlük 1305 LogGyro                      |
-| raw/mvo                 | tello_interfaces/Mvo            | 5 Hz                               | mvo                      | günlük 29 LogNewMvoFeedback              |
-| raw/tof                 | tello_interfaces/Tof            | 5 Hz                               | tof                      | günlük 16 LogTof                         |
-| raw/nav                 | tello_interfaces/Nav            | 10 Hz                              | nav                      | günlük 2064 LogImuEx                     |
-| raw/osd                 | tello_interfaces/Osd            | ~1.7 Hz                            | osd                      | günlük 12 LogOsdGeneral                  |
-| raw/sticks              | tello_interfaces/Sticks         | 5 Hz                               | sticks                   | günlük 1000 LogController                |
-| raw/attitude_target     | tello_interfaces/AttitudeTarget | 2.5 Hz, sadece motorlar çalışırken | attitude_target          | günlük 1304 LogAttitudeControl           |
-| raw/motors              | tello_interfaces/Motors         | 10 Hz, sadece motorlar çalışırken  | motors                   | günlük 1307 LogMotorCtrl                 |
-| raw/battery             | tello_interfaces/Battery        | 5 Hz                               | battery                  | günlük 1710 LogBattery                   |
-| raw/unsolved            | tello_interfaces/Unsolved       | kayda göre 0.5–20 Hz               | unsolved                 | çözülmemiş günlük kayıtları              |
-| raw/frame               | tello_interfaces/Frame          | ~30 fps                            | frame                    | video, UDP 6038                          |
-| raw/std/imu             | sensor_msgs/Imu                 | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
-| raw/std/imu/temperature | sensor_msgs/Temperature         | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
-| raw/std/tof             | sensor_msgs/Range               | 5 Hz                               | tof                      | günlük 16 LogTof                         |
-| raw/std/battery         | sensor_msgs/BatteryState        | 10 Hz                              | status                   | paket 0x0056 (FlightData)                |
-| raw/std/image           | sensor_msgs/Image               | ~30 fps                            | frame                    | video, UDP 6038                          |
-+-------------------------+---------------------------------+------------------------------------+--------------------------+------------------------------------------+
++-------------------------+------------------------------------------+------------------------------------+--------------------------+------------------------------------------+
+| Topic                   | Mesaj tipi                               | Sıklık                             | Tello verisi (tellolink) | Drone kaynağı                            |
++=========================+==========================================+====================================+==========================+==========================================+
+| raw/status              | tello_interfaces/Status                  | 10 Hz                              | status                   | paket 0x0056 (FlightData)                |
+| raw/wifi                | tello_interfaces/Wifi                    | 1 Hz                               | wifi                     | paket 0x001A                             |
+| raw/imu                 | tello_interfaces/Imu                     | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
+| raw/baro                | tello_interfaces/Baro                    | 10 Hz                              | imu                      | günlük 2048 LogImuAtti (barometre kısmı) |
+| raw/gyro                | tello_interfaces/Gyro                    | 20 Hz, sadece motorlar çalışırken  | gyro                     | günlük 1305 LogGyro                      |
+| raw/mvo                 | tello_interfaces/Mvo                     | 5 Hz                               | mvo                      | günlük 29 LogNewMvoFeedback              |
+| raw/tof                 | tello_interfaces/Tof                     | 5 Hz                               | tof                      | günlük 16 LogTof                         |
+| raw/nav                 | tello_interfaces/Nav                     | 10 Hz                              | nav                      | günlük 2064 LogImuEx                     |
+| raw/osd                 | tello_interfaces/Osd                     | ~1.7 Hz                            | osd                      | günlük 12 LogOsdGeneral                  |
+| raw/sticks              | tello_interfaces/Sticks                  | 5 Hz                               | sticks                   | günlük 1000 LogController                |
+| raw/attitude_target     | tello_interfaces/AttitudeTarget          | 2.5 Hz, sadece motorlar çalışırken | attitude_target          | günlük 1304 LogAttitudeControl           |
+| raw/motors              | tello_interfaces/Motors                  | 10 Hz, sadece motorlar çalışırken  | motors                   | günlük 1307 LogMotorCtrl                 |
+| raw/battery             | tello_interfaces/Battery                 | 5 Hz                               | battery                  | günlük 1710 LogBattery                   |
+| raw/unsolved            | tello_interfaces/Unsolved                | kayda göre 0.5–20 Hz               | unsolved                 | çözülmemiş günlük kayıtları              |
+| raw/std/imu             | sensor_msgs/Imu                          | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
+| raw/std/imu/temperature | sensor_msgs/Temperature                  | 10 Hz                              | imu                      | günlük 2048 LogImuAtti                   |
+| raw/std/tof             | sensor_msgs/Range                        | 5 Hz                               | tof                      | günlük 16 LogTof                         |
+| raw/std/battery         | sensor_msgs/BatteryState                 | 10 Hz                              | status                   | paket 0x0056 (FlightData)                |
+| raw/std/image           | sensor_msgs/Image                        | ~30 fps                            | frame                    | video, UDP 6038                          |
+| raw/std/image/ffmpeg    | ffmpeg_image_transport_msgs/FFMPEGPacket | ~30 fps                            | frame                    | video, UDP 6038                          |
++-------------------------+------------------------------------------+------------------------------------+--------------------------+------------------------------------------+
 
 2.2 Alan alan eşleşme: raw/<topic> (tello_interfaces)
 -----------------------------------------------------
@@ -530,52 +530,47 @@ Sıklık: kayda göre 0.5–20 Hz    Tip: tello_interfaces/Unsolved    Kaynak: �
 | payload   | unsolved.payload   | aynen   |
 +-----------+--------------------+---------+
 
-2.2.15 raw/frame ← frame (video, UDP 6038), tello_interfaces/Frame
-··································································
-
-Ne: Kamera karesi, ham H.264 byte'ları (çözülmüş görüntü raw/std/image'da).
-Sıklık: ~30 fps    Tip: tello_interfaces/Frame    Kaynak: video, UDP 6038
-
-+-----------+----------------+-------------------+
-| ROS alanı | Tello verisi   | Dönüşüm           |
-+===========+================+===================+
-| keyframe  | frame.keyframe | aynen             |
-| data      | frame.data     | aynen (ham H.264) |
-+-----------+----------------+-------------------+
-
 2.3 Alan alan eşleşme: raw/std/* (sensor_msgs)
 ----------------------------------------------
 
-+-------------------------+-------------------------------------------------------------+---------+--------------------------+
-| Topic                   | Ne                                                          | Sıklık  | Tip                      |
-+=========================+=============================================================+=========+==========================+
-| raw/std/imu             | IMU: yönelim, açısal hız, ivme (base_link, yerçekimi dahil) | 10 Hz   | sensor_msgs/Imu          |
-| raw/std/imu/temperature | IMU sıcaklığı                                               | 10 Hz   | sensor_msgs/Temperature  |
-| raw/std/tof             | aşağı bakan mesafe sensörü                                  | 5 Hz    | sensor_msgs/Range        |
-| raw/std/battery         | pil gerilimi ve yüzdesi (uçuş durumu paketinden)            | 10 Hz   | sensor_msgs/BatteryState |
-| raw/std/image           | kamera görüntüsü, çözülmüş (bgr8)                           | ~30 fps | sensor_msgs/Image        |
-+-------------------------+-------------------------------------------------------------+---------+--------------------------+
++-------------------------+-------------------------------------------------------------------------+---------+------------------------------------------+
+| Topic                   | Ne                                                                      | Sıklık  | Tip                                      |
++=========================+=========================================================================+=========+==========================================+
+| raw/std/imu             | IMU: yönelim, açısal hız, ivme (base_link, yerçekimi dahil)             | 10 Hz   | sensor_msgs/Imu                          |
+| raw/std/imu/temperature | IMU sıcaklığı                                                           | 10 Hz   | sensor_msgs/Temperature                  |
+| raw/std/tof             | aşağı bakan mesafe sensörü                                              | 5 Hz    | sensor_msgs/Range                        |
+| raw/std/battery         | pil gerilimi ve yüzdesi (uçuş durumu paketinden)                        | 10 Hz   | sensor_msgs/BatteryState                 |
+| raw/std/image           | kamera görüntüsü, çözülmüş (bgr8)                                       | ~30 fps | sensor_msgs/Image                        |
+| raw/std/image/ffmpeg    | aynı kareler sıkıştırılmış (drone'un H.264'ü); image_transport "ffmpeg" | ~30 fps | ffmpeg_image_transport_msgs/FFMPEGPacket |
++-------------------------+-------------------------------------------------------------------------+---------+------------------------------------------+
 
-+-------------------------+----------------------------------------+----------------------------+---------------------------------------------------+
-| Topic                   | ROS alanı                              | Tello verisi               | Dönüşüm                                           |
-+=========================+========================================+============================+===================================================+
-| raw/std/imu             | header.frame_id                        | -                          | base_link                                         |
-|                         | orientation (w, x, y, z)               | imu.q0, q1, q2, q3         | (q0, q1, −q2, −q3), normalize                     |
-|                         | angular_velocity (x, y, z)             | imu.gyro_x, gyro_y, gyro_z | (x, −y, −z), rad/s                                |
-|                         | linear_acceleration (x, y, z)          | imu.acc_x, acc_y, acc_z    | × 9.80665, (x, −y, −z); dururken z ≈ +9.81        |
-|                         | *_covariance                           | -                          | doldurulmuyor (0 = bilinmiyor)                    |
-| raw/std/imu/temperature | temperature                            | imu.temperature            | aynen (°C); kayıtta yoksa yayınlanmaz             |
-| raw/std/tof             | header.frame_id                        | -                          | tof                                               |
-|                         | range                                  | tof.distance               | aynen (m)                                         |
-|                         | min_range, max_range, field_of_view    | -                          | sabit: 0.1 m, 10.0 m, 0.44 rad (tahmin); INFRARED |
-| raw/std/battery         | header.frame_id                        | -                          | base_link                                         |
-|                         | voltage                                | status.battery_voltage     | aynen (V)                                         |
-|                         | percentage                             | status.battery_percent     | ÷ 100                                             |
-|                         | temperature, current, charge, capacity | -                          | NaN                                               |
-|                         | power_supply_status / technology       | -                          | DISCHARGING / LIPO; present = True                |
-| raw/std/image           | header.frame_id                        | -                          | camera_optical                                    |
-|                         | height, width, data                    | frame.image                | aynen; encoding bgr8, step = width × 3            |
-+-------------------------+----------------------------------------+----------------------------+---------------------------------------------------+
++-------------------------+----------------------------------------+----------------------------+-----------------------------------------------------------+
+| Topic                   | ROS alanı                              | Tello verisi               | Dönüşüm                                                   |
++=========================+========================================+============================+===========================================================+
+| raw/std/imu             | header.frame_id                        | -                          | base_link                                                 |
+|                         | orientation (w, x, y, z)               | imu.q0, q1, q2, q3         | (q0, q1, −q2, −q3), normalize                             |
+|                         | angular_velocity (x, y, z)             | imu.gyro_x, gyro_y, gyro_z | (x, −y, −z), rad/s                                        |
+|                         | linear_acceleration (x, y, z)          | imu.acc_x, acc_y, acc_z    | × 9.80665, (x, −y, −z); dururken z ≈ +9.81                |
+|                         | *_covariance                           | -                          | doldurulmuyor (0 = bilinmiyor)                            |
+| raw/std/imu/temperature | temperature                            | imu.temperature            | aynen (°C); kayıtta yoksa yayınlanmaz                     |
+| raw/std/tof             | header.frame_id                        | -                          | tof                                                       |
+|                         | range                                  | tof.distance               | aynen (m)                                                 |
+|                         | min_range, max_range, field_of_view    | -                          | sabit: 0.1 m, 10.0 m, 0.44 rad (tahmin); INFRARED         |
+| raw/std/battery         | header.frame_id                        | -                          | base_link                                                 |
+|                         | voltage                                | status.battery_voltage     | aynen (V)                                                 |
+|                         | percentage                             | status.battery_percent     | ÷ 100                                                     |
+|                         | temperature, current, charge, capacity | -                          | NaN                                                       |
+|                         | power_supply_status / technology       | -                          | DISCHARGING / LIPO; present = True                        |
+| raw/std/image           | header.frame_id                        | -                          | camera_optical                                            |
+|                         | height, width, data                    | frame.image                | aynen; encoding bgr8, step = width × 3                    |
+| raw/std/image/ffmpeg    | header                                 | frame.recv_time            | raw/std/image ile aynı stamp ve frame_id (camera_optical) |
+|                         | width, height                          | frame.image                | görüntü boyutu (960, 720)                                 |
+|                         | encoding                               | -                          | sabit "h264" (abone tarafı bgr8 üretir)                   |
+|                         | pts                                    | -                          | sayaç: her karede +1 (benzersiz olmalı)                   |
+|                         | flags                                  | frame.keyframe             | anahtar kare 1, diğerleri 0                               |
+|                         | is_bigendian                           | -                          | false                                                     |
+|                         | data                                   | frame.data                 | aynen (ham H.264)                                         |
++-------------------------+----------------------------------------+----------------------------+-----------------------------------------------------------+
 
 2.4 Komutlar (ROS → drone)
 --------------------------

@@ -9,12 +9,13 @@ Published
                      ROS axes (REP-103) and SI units (see TO_ROS): body FLU; world x = yaw 0,
                      y left, z up (no compass); angles rad. Sticks keep Tello signs.
                      Topics: status, wifi, imu, baro, gyro, mvo, tof, nav, osd, sticks,
-                     attitude_target, motors, battery, unsolved, frame (raw H.264).
+                     attitude_target, motors, battery, unsolved.
     raw/std/imu              sensor_msgs/Imu          base_link FLU, m/s^2, rad/s
     raw/std/imu/temperature  sensor_msgs/Temperature
     raw/std/tof              sensor_msgs/Range
     raw/std/battery          sensor_msgs/BatteryState  from the status packet
     raw/std/image            sensor_msgs/Image         bgr8, frame camera_optical
+    raw/std/image/ffmpeg     ffmpeg_image_transport_msgs/FFMPEGPacket  the same frames as H.264
 Subscribed
     cmd_sticks       tello_interfaces/StickCommand  stick fractions -1..1, Tello signs; set to 0 if
                      none arrives for CMD_TIMEOUT s
@@ -30,6 +31,7 @@ import array
 import math
 import time
 
+from ffmpeg_image_transport_msgs.msg import FFMPEGPacket
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -63,7 +65,6 @@ RAW = [
     (Tello.EVENT_MOTORS, 'motors', tmsg.Motors),
     (Tello.EVENT_BATTERY, 'battery', tmsg.Battery),
     (Tello.EVENT_UNSOLVED, 'unsolved', tmsg.Unsolved),
-    (Tello.EVENT_FRAME, 'frame', tmsg.Frame),
 ]
 
 
@@ -123,7 +124,7 @@ TO_ROS = {
 
 def field_value(v, ftype):
     """Python value -> value for a message field of type ftype."""
-    if ftype.startswith('sequence<uint8'):      # bytes (Unsolved.payload, Frame.data)
+    if ftype.startswith('sequence<uint8'):      # bytes (Unsolved.payload)
         return array.array('B', v)
     if ftype.startswith('float') and '[' in ftype:
         return [float(c) for c in v]            # Gyro.stage*, Motors.pwm
@@ -159,6 +160,9 @@ class TelloNode(Node):
         self.pub_tof = self.create_publisher(Range, 'raw/std/tof', 10)
         self.pub_battery = self.create_publisher(BatteryState, 'raw/std/battery', 10)
         self.pub_image = self.create_publisher(Image, 'raw/std/image', qos_profile_sensor_data)
+        # The same frames compressed (H.264 as the drone sends it), image_transport "ffmpeg" format.
+        self.pub_ffmpeg = self.create_publisher(FFMPEGPacket, 'raw/std/image/ffmpeg', 10)
+        self._pts = 0
 
         self.create_subscription(tmsg.StickCommand, 'cmd_sticks', self._on_sticks, 10)
         self.create_subscription(Bool, 'fast_mode', self._on_fast_mode, 10)
@@ -183,11 +187,9 @@ class TelloNode(Node):
             self.get_logger().warn("'av' not installed (sudo apt install python3-av): no video.")
 
         for event, topic, msg_type in RAW:
-            if event == d.EVENT_FRAME and not video:
-                continue
             fields = [(n, t) for n, t in msg_type.get_fields_and_field_types().items()
                       if n != 'header']
-            pub = self.create_publisher(msg_type, 'raw/' + topic, 2 if topic == 'frame' else 10)
+            pub = self.create_publisher(msg_type, 'raw/' + topic, 10)
             skip = stale_imu if event == d.EVENT_IMU else None
             d.subscribe(event, self._raw_publisher(pub, msg_type, fields, TO_ROS.get(topic), skip))
         d.subscribe(d.EVENT_IMU, self._on_imu)
@@ -310,6 +312,17 @@ class TelloNode(Node):
         msg.step = msg.width * 3
         msg.data = f.image.tobytes()
         self.pub_image.publish(msg)
+
+        pkt = FFMPEGPacket()
+        pkt.header = msg.header                 # same stamp and frame_id as the decoded image
+        pkt.width, pkt.height = msg.width, msg.height
+        pkt.encoding = 'h264'                   # codec only; the decoder outputs bgr8
+        pkt.pts = self._pts                     # must be unique and increasing
+        self._pts += 1
+        pkt.flags = 1 if f.keyframe else 0      # subscribers start at the first packet with flags != 0
+        pkt.is_bigendian = False
+        pkt.data = array.array('B', f.data)
+        self.pub_ffmpeg.publish(pkt)
 
     def destroy_node(self):
         self._stop()

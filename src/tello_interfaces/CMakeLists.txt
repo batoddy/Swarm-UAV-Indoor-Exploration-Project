@@ -9,7 +9,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AttitudeTarget.msg"
   "msg/Baro.msg"
   "msg/Battery.msg"
-  "msg/Frame.msg"
   "msg/Gyro.msg"
   "msg/Imu.msg"
   "msg/Motors.msg"
